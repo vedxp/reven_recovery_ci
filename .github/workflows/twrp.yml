@@ -14,6 +14,8 @@ env:
   BUILD_TARGET: recovery
   GIT_USERNAME: vedxp
   GIT_EMAIL: 87353286+vedxp@users.noreply.github.com
+  TZ: Asia/Kolkata
+  TWRP_VERSION: 3.7.0
 
 jobs:
   build:
@@ -29,9 +31,10 @@ jobs:
 
       - name: Prepare Environment
         run: |
+          sudo apt remove shim-signed grub-efi-amd64-bin --allow-remove-essential
           sudo apt update
           sudo apt -y upgrade
-          sudo apt -y install gperf gcc-multilib gcc-10-multilib g++-multilib g++-10-multilib libc6-dev lib32ncurses5-dev x11proto-core-dev libx11-dev tree lib32z-dev libgl1-mesa-dev libxml2-utils xsltproc bc ccache lib32readline-dev lib32z1-dev liblz4-tool libncurses5-dev libsdl1.2-dev libwxgtk3.0-gtk3-dev libxml2 lzop pngcrush schedtool squashfs-tools imagemagick libbz2-dev lzma ncftp qemu-user-static libstdc++-10-dev libncurses5 python
+          sudo apt -y install gperf gcc-multilib gcc-10-multilib g++-multilib g++-10-multilib libc6-dev lib32ncurses5-dev x11proto-core-dev libx11-dev tree lib32z-dev libgl1-mesa-dev libxml2-utils xsltproc bc lib32readline-dev lib32z1-dev liblz4-tool libncurses5-dev libsdl1.2-dev libwxgtk3.0-gtk3-dev libxml2 lzop pngcrush schedtool squashfs-tools imagemagick libbz2-dev lzma ncftp qemu-user-static libstdc++-10-dev libncurses5 python
 
       - name: Install OpenJDK
         uses: actions/setup-java@v3
@@ -41,8 +44,7 @@ jobs:
 
       - name: Install Repo
         run: |
-          mkdir ~/bin
-          curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
+          git clone https://android.googlesource.com/tools/repo -b v2.32 ~/bin
           chmod a+x ~/bin/repo
           sudo ln -sf ~/bin/repo /usr/bin/repo
 
@@ -50,7 +52,7 @@ jobs:
         run: |
           mkdir workspace
           cd workspace
-          echo "workspace-folder=$(pwd)" >> $GITHUB_OUTPUT
+          echo "workdir=$(pwd)" >> $GITHUB_OUTPUT
           git config --global user.name "${{ env.GIT_USERNAME }}"
           git config --global user.email "${{ env.GIT_EMAIL }}"
           repo init --depth=1 -u ${{ env.MANIFEST }} -b ${{ env.MANIFEST_BRANCH }}
@@ -58,13 +60,13 @@ jobs:
 
       - name: Sync Repo
         run: |
-          repo sync -c --no-tags -j$(nproc --all)
+          repo sync --no-tags -j$(nproc --all)
         working-directory: workspace
 
       - name: Clone Device Tree
         run: |
           git clone --depth=1 --single-branch https://${{ secrets.ACCESS_TOKEN }}@github.com/${{ env.DEVICE_TREE }} -b ${{ env.DEVICE_TREE_BRANCH }} ./${{ env.DEVICE_PATH }}
-        working-directory: ${{ steps.pwd.outputs.workspace-folder }}
+        working-directory: ${{ steps.pwd.outputs.workdir }}
 
       - name: Set Swap Space
         uses: pierotofy/set-swap-space@master
@@ -78,16 +80,23 @@ jobs:
           lunch ${{ env.MAKEFILE_NAME }}-eng
           make clean
           make ${{ env.BUILD_TARGET }}image -j$(nproc --all)
-        working-directory: ${{ steps.pwd.outputs.workspace-folder }}
+        working-directory: ${{ steps.pwd.outputs.workdir }}
 
-      - name: Generate Hash Checksums
+      - name: Generate Properties
         run: |
           SHA256=$(sha256sum ${{env.BUILD_TARGET}}.img | cut -d ' ' -f 1)
           MD5=$(md5sum ${{env.BUILD_TARGET}}.img | cut -d ' ' -f 1)
           echo "SHA256=${SHA256}" >> $GITHUB_OUTPUT
           echo "MD5=${MD5}" >> $GITHUB_OUTPUT
+          echo "datetime=$(date '+%d-%m-%Y %H:%M')" >> $GITHUB_OUTPUT
         working-directory: workspace/out/target/product/${{ env.DEVICE_NAME }}
-        id: hash
+        id: props
+
+      - name: Rename Output Image
+        run: |
+          cd out/target/product/${{ env.DEVICE_NAME }}
+          mv ${{ env.BUILD_TARGET }}.img "${{ env.DEVICE_NAME }} ${{ env.MANIFEST_BRANCH }} v3.7.0 ${{ steps.props.outputs.datetime }}.img"
+        working-directory: ${{ steps.pwd.outputs.workdir }}
 
       - name: Publish Release
         uses: softprops/action-gh-release@v1
@@ -95,10 +104,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           files: workspace/out/target/product/${{ env.DEVICE_NAME }}/${{ env.BUILD_TARGET }}.img
-          name: ${{ env.DEVICE_NAME }}-${{ github.run_id }}
-          tag_name: ${{ github.run_id }}
+          name: "TWRP ${{ env.DEVICE_NAME }} ${{ steps.props.outputs.datetime }}"
           body: |
             ## Release Notes
             - **Manifest:** `${{ env.MANIFEST_BRANCH }}`
-            - **SHA256 Checksum:** `${{ steps.hash.outputs.SHA256 }}`
-            - **MD5 Checksum:** `${{ steps.hash.outputs.MD5 }}`
+            - **Version:** `${{ env.TWRP_VERSION }}`
+            - **MD5 Checksum:** `${{ steps.props.outputs.MD5 }}`
+            - **SHA256 Checksum:** `${{ steps.props.outputs.SHA256 }}`
