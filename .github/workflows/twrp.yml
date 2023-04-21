@@ -104,6 +104,7 @@ jobs:
         with:
           files: workspace/out/target/product/${{ env.DEVICE_NAME }}/${{ env.BUILD_TARGET }}.img
           name: TWRP ${{ env.DEVICE_NAME }} ${{ steps.props.outputs.datetime }}
+          tag_name: ${{ github.run_id }}
           body: |
             ## Release Notes
             - **Manifest:** `${{ env.MANIFEST_BRANCH }}`
