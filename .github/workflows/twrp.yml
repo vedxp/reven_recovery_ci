@@ -95,15 +95,18 @@ jobs:
         run: |
           cd out/target/product/${{ env.DEVICE_NAME }}
           mv ${{ env.BUILD_TARGET }}.img "${{ env.DEVICE_NAME }} ${{ env.MANIFEST_BRANCH }} v3.7.0 ${{ steps.props.outputs.datetime }}.img"
+          echo "imgname=${env.DEVICE_NAME} ${env.MANIFEST_BRANCH} v3.7.0 ${steps.props.outputs.datetime}.img" >> $GITHUB_OUTPUT
+        #          echo "imgname=${${{ env.DEVICE_NAME }} ${{ env.MANIFEST_BRANCH }} v3.7.0 ${{ steps.props.outputs.datetime }}.img}" >> $GITHUB_OUTPUT
         working-directory: ${{ steps.pwd.outputs.workdir }}
+        id: name
 
       - name: Publish Release
         uses: softprops/action-gh-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          files: workspace/out/target/product/${{ env.DEVICE_NAME }}/${{ env.BUILD_TARGET }}.img
-          name: TWRP ${{ env.DEVICE_NAME }} ${{ steps.props.outputs.datetime }}
+          files: workspace/out/target/product/${{ steps.name.outputs.imgname }}
+          name: ${{ steps.props.outputs.datetime }}
           tag_name: ${{ github.run_id }}
           body: |
             ## Release Notes
