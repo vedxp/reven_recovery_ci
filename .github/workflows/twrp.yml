@@ -1,0 +1,104 @@
+name: Build TWRP
+
+on:
+  workflow_dispatch:
+
+env:
+  MANIFEST: https://github.com/minimal-manifest-twrp/platform_manifest_twrp_aosp
+  MANIFEST_BRANCH: twrp-12.1
+  DEVICE_TREE: DrtSinX98/device_realme_RMX3430-twrp
+  DEVICE_TREE_BRANCH: 12
+  DEVICE_NAME: reven
+  DEVICE_PATH: device/realme/reven
+  MAKEFILE_NAME: twrp_reven
+  BUILD_TARGET: recovery
+  GIT_USERNAME: vedxp
+  GIT_EMAIL: 87353286+vedxp@users.noreply.github.com
+
+jobs:
+  build:
+    runs-on: ubuntu-20.04
+    permissions:
+      contents: write
+    steps:
+      - name: Check Out
+        uses: actions/checkout@v3
+
+      - name: Cleanup
+        uses: rokibhasansagar/slimhub_actions@main
+
+      - name: Prepare Environment
+        run: |
+          sudo apt update
+          sudo apt -y upgrade
+          sudo apt -y install gperf gcc-multilib gcc-10-multilib g++-multilib g++-10-multilib libc6-dev lib32ncurses5-dev x11proto-core-dev libx11-dev tree lib32z-dev libgl1-mesa-dev libxml2-utils xsltproc bc ccache lib32readline-dev lib32z1-dev liblz4-tool libncurses5-dev libsdl1.2-dev libwxgtk3.0-gtk3-dev libxml2 lzop pngcrush schedtool squashfs-tools imagemagick libbz2-dev lzma ncftp qemu-user-static libstdc++-10-dev libncurses5 python
+
+      - name: Install OpenJDK
+        uses: actions/setup-java@v3
+        with:
+          distribution: "zulu"
+          java-version: "8"
+
+      - name: Install Repo
+        run: |
+          mkdir ~/bin
+          curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
+          chmod a+x ~/bin/repo
+          sudo ln -sf ~/bin/repo /usr/bin/repo
+
+      - name: Initialize Repo
+        run: |
+          mkdir workspace
+          cd workspace
+          echo "workspace-folder=$(pwd)" >> $GITHUB_OUTPUT
+          git config --global user.name "${{ env.GIT_USERNAME }}"
+          git config --global user.email "${{ env.GIT_EMAIL }}"
+          repo init --depth=1 -u ${{ env.MANIFEST }} -b ${{ env.MANIFEST_BRANCH }}
+        id: pwd
+
+      - name: Sync Repo
+        run: |
+          repo sync -c --no-tags -j$(nproc --all)
+        working-directory: workspace
+
+      - name: Clone Device Tree
+        run: |
+          git clone --depth=1 --single-branch https://${{ secrets.ACCESS_TOKEN }}@github.com/${{ env.DEVICE_TREE }} -b ${{ env.DEVICE_TREE_BRANCH }} ./${{ env.DEVICE_PATH }}
+        working-directory: ${{ steps.pwd.outputs.workspace-folder }}
+
+      - name: Set Swap Space
+        uses: pierotofy/set-swap-space@master
+        with:
+          swap-size-gb: 12
+
+      - name: Build Recovery
+        run: |
+          source build/envsetup.sh
+          export ALLOW_MISSING_DEPENDENCIES=true
+          lunch ${{ env.MAKEFILE_NAME }}-eng
+          make clean
+          make ${{ env.BUILD_TARGET }}image -j$(nproc --all)
+        working-directory: ${{ steps.pwd.outputs.workspace-folder }}
+
+      - name: Generate Hash Checksums
+        run: |
+          SHA256=$(sha256sum ${{env.BUILD_TARGET}}.img | cut -d ' ' -f 1)
+          MD5=$(md5sum ${{env.BUILD_TARGET}}.img | cut -d ' ' -f 1)
+          echo "SHA256=${SHA256}" >> $GITHUB_OUTPUT
+          echo "MD5=${MD5}" >> $GITHUB_OUTPUT
+        working-directory: workspace/out/target/product/${{ env.DEVICE_NAME }}
+        id: hash
+
+      - name: Publish Release
+        uses: softprops/action-gh-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          files: workspace/out/target/product/${{ env.DEVICE_NAME }}/${{ env.BUILD_TARGET }}.img
+          name: ${{ env.DEVICE_NAME }}-${{ github.run_id }}
+          tag_name: ${{ github.run_id }}
+          body: |
+            ## Release Notes
+            - **Manifest:** `${{ env.MANIFEST_BRANCH }}`
+            - **SHA256 Checksum:** `${{ steps.hash.outputs.SHA256 }}`
+            - **MD5 Checksum:** `${{ steps.hash.outputs.MD5 }}`
